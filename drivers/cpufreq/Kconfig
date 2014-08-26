@@ -118,19 +118,6 @@ config CPU_FREQ_DEFAULT_GOV_LIONHEART
 	help
 	  Use the CPUFreq governor 'Lionheart' as default.
 
-
-config CPU_FREQ_DEFAULT_GOV_SMARTASSH3
-	bool "smartassH3"
-	select CPU_FREQ_GOV_SMARTASSH3
-	help
-	  Use the CPUFreq governor 'smartassH3' as default.
-
-config CPU_FREQ_DEFAULT_GOV_SMARTASS2
-	bool "smartass2"
-	select CPU_FREQ_GOV_SMARTASS2
-	help
-	  Use the CPUFreq governor 'smartassV2' as default.
-
 config CPU_FREQ_DEFAULT_GOV_SMARTMAX
 	bool "smartmax"
 	select CPU_FREQ_GOV_SMARTMAX
@@ -266,22 +253,6 @@ config CPU_FREQ_GOV_LIONHEART
         depends on CPU_FREQ
         help
          'Lionheart' - A brave and agile conservative-based governor.
-
-config CPU_FREQ_GOV_SMARTASSH3
-	tristate "'smartassH3' cpufreq governor"
-	depends on CPU_FREQ
-	help
-	  'smartassH3' - a "smart" governor
-
-	  If in doubt, say N.
-
-config CPU_FREQ_GOV_SMARTASS2
-	tristate "'smartassV2' cpufreq governor"
-	depends on CPU_FREQ
-	help
-	  'smartassV2' - a "smart" optimized governor!
-
-	  If in doubt, say N.
 
 config CPU_FREQ_GOV_SMARTMAX
 	tristate "'smartmax' cpufreq policy governor"
