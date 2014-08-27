@@ -12,37 +12,51 @@
 #include <linux/errno.h>
 #include <linux/module.h>
 #include <linux/devfreq.h>
-#include <linux/math64.h>
+#include <linux/msm_adreno_devfreq.h>
 #include "governor.h"
 
+#define DEVFREQ_SIMPLE_ONDEMAND	"simple_ondemand"
+
+/*
+ * CEILING is 50msec, larger than any standard
+ * frame length.
+ */
+#define CEILING			50000
+
 /* Default constants for DevFreq-Simple-Ondemand (DFSO) */
-#define DFSO_UPTHRESHOLD	(90)
-#define DFSO_DOWNDIFFERENCTIAL	(5)
+#define DFSO_UPTHRESHOLD	20
+#define DFSO_DOWNDIFFERENCTIAL	10
+
+static unsigned int dfso_upthreshold = DFSO_UPTHRESHOLD;
+static unsigned int dfso_downdifferential = DFSO_DOWNDIFFERENCTIAL;
+
+static unsigned int level = 0;
+static unsigned int load = 0;
+
+static inline int get_freq_num(struct devfreq *df) {
+
+	int num = 0; 
+	int i;
+
+	for (i = 0; df->profile->freq_table[i]; i++)
+		num++;
+
+	return num;
+}
+
 static int devfreq_simple_ondemand_func(struct devfreq *df,
 					unsigned long *freq,
 					u32 *flag)
 {
 	struct devfreq_dev_status stat;
-	int err = df->profile->get_dev_status(df->dev.parent, &stat);
-	unsigned long long a, b;
-	unsigned int dfso_upthreshold = DFSO_UPTHRESHOLD;
-	unsigned int dfso_downdifferential = DFSO_DOWNDIFFERENCTIAL;
-	struct devfreq_simple_ondemand_data *data = df->data;
+	int ret = 0;
 	unsigned long max = (df->max_freq) ? df->max_freq : UINT_MAX;
-	unsigned long min = (df->min_freq) ? df->min_freq : 0;
 
-	if (err)
-		return err;
+	stat.private_data = NULL;
 
-	if (data) {
-		if (data->upthreshold)
-			dfso_upthreshold = data->upthreshold;
-		if (data->downdifferential)
-			dfso_downdifferential = data->downdifferential;
-	}
-	if (dfso_upthreshold > 100 ||
-	    dfso_upthreshold < dfso_downdifferential)
-		return -EINVAL;
+	ret = df->profile->get_dev_status(df->dev.parent, &stat);
+	if (ret)
+		return ret;
 
 	/* Prevent overflow */
 	if (stat.busy_time >= (1 << 24) || stat.total_time >= (1 << 24)) {
@@ -50,69 +64,133 @@ static int devfreq_simple_ondemand_func(struct devfreq *df,
 		stat.total_time >>= 7;
 	}
 
-	if (data && data->simple_scaling) {
-		if (stat.busy_time * 100 >
-		    stat.total_time * dfso_upthreshold)
-			*freq = max;
-		else if (stat.busy_time * 100 <
-		    stat.total_time * dfso_downdifferential)
-			*freq = min;
-		else
-			*freq = df->previous_freq;
-		return 0;
+	/*
+	 * If there is an extended block of busy processing,
+	 * increase frequency. Otherwise run the normal algorithm.
+	 */
+	if (stat.busy_time > CEILING) {
+		*freq = max;
+		return ret;
 	}
 
-	/* Assume MAX if it is going to be divided by zero */
-	if (stat.total_time == 0) {
+	/*
+	 * Assume the max frequency if;
+	 * 1.) The total time is 0 (division by 0)
+	 * 2.) It's already really busy
+	 * 3.) The driver has no clue about the initial frequency
+	 *
+	 */
+	if (stat.total_time == 0
+		|| stat.busy_time * 100 >
+	    		stat.total_time * dfso_upthreshold
+		|| stat.current_frequency == 0) {
 		*freq = max;
-		return 0;
-	}
-
-	/* Set MAX if it's busy enough */
-	if (stat.busy_time * 100 >
-	    stat.total_time * dfso_upthreshold) {
-		*freq = max;
-		return 0;
-	}
-
-	/* Set MAX if we do not know the initial frequency */
-	if (stat.current_frequency == 0) {
-		*freq = max;
-		return 0;
+		return ret;
 	}
 
 	/* Keep the current frequency */
 	if (stat.busy_time * 100 >
 	    stat.total_time * (dfso_upthreshold - dfso_downdifferential)) {
 		*freq = stat.current_frequency;
-		return 0;
+		return ret;
 	}
 
 	/* Set the desired frequency based on the load */
-	a = stat.busy_time;
-	a *= stat.current_frequency;
-	b = div_u64(a, stat.total_time);
-	b *= 100;
-	b = div_u64(b, (dfso_upthreshold - dfso_downdifferential / 2));
-	*freq = (unsigned long) b;
+	load = (100 * (unsigned int)stat.busy_time) /
+			(unsigned int)stat.total_time;
 
-	if (df->min_freq && *freq < df->min_freq)
-		*freq = df->min_freq;
-	if (df->max_freq && *freq > df->max_freq)
-		*freq = df->max_freq;
+	if (load >= dfso_upthreshold) {
+		if (level > 0)		
+			level--;		
+	} else if (load <= dfso_downdifferential) {
+		if (level < get_freq_num(df))		
+			level++;
+	} else {
+		/* If unsure about the frequency, stay at the current */
+		*freq = stat.current_frequency;
+		return ret;
+	}
 
-	return 0;
+	*freq = df->profile->freq_table[level];
+
+	return ret;
 }
+
+static ssize_t simple_ondemand_upthreshold_show(struct kobject *kobj,
+						struct kobj_attribute *attr,
+						char *buf)
+{
+	return sprintf(buf, "%d\n", dfso_upthreshold);
+}
+
+static ssize_t simple_ondemand_upthreshold_store(struct kobject *kobj,
+						  struct kobj_attribute *attr,
+						  const char *buf, size_t count)
+{
+	unsigned int val;
+
+	sscanf(buf, "%d", &val);
+	if (val > 100 || val < dfso_downdifferential)
+		return -EINVAL;
+
+	dfso_upthreshold = val;
+
+	return count;
+}
+
+static ssize_t simple_ondemand_downdifferential_show(struct kobject *kobj,
+						     struct kobj_attribute *attr,
+						     char *buf)
+{
+	return sprintf(buf, "%d\n", dfso_downdifferential);
+}
+
+static ssize_t simple_ondemand_downdifferential_store(struct kobject *kobj,
+						      struct kobj_attribute *attr,
+						      const char *buf, size_t count)
+{
+	unsigned int val;
+
+	sscanf(buf, "%d", &val);
+	if (val > dfso_upthreshold)
+		return -EINVAL;
+
+	dfso_downdifferential = val;
+
+	return count;
+}
+
+static struct kobj_attribute upthreshold_attribute =
+	__ATTR(upthreshold, 0664, simple_ondemand_upthreshold_show,
+	       simple_ondemand_upthreshold_store);
+static struct kobj_attribute downdifferential_attribute =
+	__ATTR(downdifferential, 0664, simple_ondemand_downdifferential_show,
+	       simple_ondemand_downdifferential_store);
+
+static struct attribute *attrs[] = {
+	&upthreshold_attribute.attr,
+	&downdifferential_attribute.attr,
+	NULL,
+};
+
+static struct attribute_group attr_group = {
+	.attrs = attrs,
+	.name = DEVFREQ_SIMPLE_ONDEMAND,
+};
 
 static int devfreq_simple_ondemand_handler(struct devfreq *devfreq,
 				unsigned int event, void *data)
 {
+	int ret = 0;
+
 	switch (event) {
 	case DEVFREQ_GOV_START:
 		devfreq_monitor_start(devfreq);
+		ret = devfreq_policy_add_files(devfreq, attr_group);
 		break;
 
 	case DEVFREQ_GOV_STOP:
+		devfreq_policy_remove_files(devfreq, attr_group);
 		devfreq_monitor_stop(devfreq);
 		break;
 
@@ -132,11 +210,11 @@ static int devfreq_simple_ondemand_handler(struct devfreq *devfreq,
 		break;
 	}
 
-	return 0;
+	return ret;
 }
 
 static struct devfreq_governor devfreq_simple_ondemand = {
-	.name = "simple_ondemand",
+	.name = DEVFREQ_SIMPLE_ONDEMAND,
 	.get_target_freq = devfreq_simple_ondemand_func,
 	.event_handler = devfreq_simple_ondemand_handler,
 };
