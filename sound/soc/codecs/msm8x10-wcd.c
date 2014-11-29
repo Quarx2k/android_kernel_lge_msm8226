@@ -2675,11 +2675,7 @@ static const struct snd_soc_dapm_widget msm8x10_wcd_dapm_widgets[] = {
 		MSM8X10_WCD_A_MICB_1_CTL, 7, 0,
 		msm8x10_wcd_codec_enable_micbias, SND_SOC_DAPM_PRE_PMU |
 		SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
-<<<<<<< HEAD
-	SND_SOC_DAPM_MICBIAS_E(DAPM_MICBIAS_EXTERNAL_STANDALONE,
-=======
 	SND_SOC_DAPM_MICBIAS_E("DAPM_MICBIAS_EXTERNAL_STANDALONE",
->>>>>>> ae908f6... Overlay of LG soruce drop
 		MSM8X10_WCD_A_MICB_1_CTL,
 		7, 0, msm8x10_wcd_codec_enable_micbias,
 		SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
@@ -2942,16 +2938,6 @@ static int msm8x10_wcd_enable_mbhc_micbias(struct snd_soc_codec *codec,
 
 	if (enable)
 		rc = snd_soc_dapm_force_enable_pin(&codec->dapm,
-<<<<<<< HEAD
-			DAPM_MICBIAS_EXTERNAL_STANDALONE);
-	else
-		rc = snd_soc_dapm_disable_pin(&codec->dapm,
-			DAPM_MICBIAS_EXTERNAL_STANDALONE);
-	snd_soc_dapm_sync(&codec->dapm);
-
-	snd_soc_update_bits(codec, WCD9XXX_A_MICB_1_CTL,
-		0x80, enable ? 0x80 : 0x00);
-=======
 			"DAPM_MICBIAS_EXTERNAL_STANDALONE");
 	else {
 		if (is_TX_up == true) {
@@ -2963,7 +2949,6 @@ static int msm8x10_wcd_enable_mbhc_micbias(struct snd_soc_codec *codec,
 	}
 	snd_soc_dapm_sync(&codec->dapm);
 
->>>>>>> ae908f6... Overlay of LG soruce drop
 	if (rc)
 		pr_debug("%s: Failed to force %s micbias", __func__,
 			enable ? "enable" : "disable");
