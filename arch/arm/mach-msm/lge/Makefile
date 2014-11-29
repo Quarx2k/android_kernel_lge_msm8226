@@ -1,6 +1,8 @@
 obj-$(CONFIG_MACH_LGE) += devices_lge.o
 
 obj-$(CONFIG_MACH_MSM8226_W7DS_OPEN_CIS) += board-8226-w7ds-open-cis.o board-8226-w7ds-open-cis-gpiomux.o
+obj-$(CONFIG_MACH_MSM8X10_W5DS_GLOBAL_COM) += board-8610-w5ds-global-com.o board-8610-w5ds-global-com-gpiomux.o
+obj-$(CONFIG_MACH_MSM8X10_W3DS_GLOBAL_COM) += board-8610-w3ds-global-com.o board-8610-w3ds-global-com-gpiomux.o
 
 obj-$(CONFIG_LGE_BOOTLOADER_LOG) += lge_bootloader_log.o
 obj-$(CONFIG_LGE_HANDLE_PANIC) += lge_handle_panic.o

@@ -9,6 +9,28 @@ config MACH_MSM8226_W7DS_OPEN_CIS
         bool "MSM8226 W7DS OPEN CIS"
         help
           Support for the Qualcomm MSM8226 W7 Dual Sim Open device.
+
+config MACH_MSM8X10_W5
+        depends on ARCH_MSM8610
+        select MACH_LGE
+        bool "MSM8610 W5 Series"
+        help
+          Support for the Qualcomm MSM8610 W5 Series device.
+
+config MACH_MSM8X10_W5DS_GLOBAL_COM
+        depends on ARCH_MSM8610
+        select MACH_LGE
+        bool "MSM8610 W5DS Global Common"
+        help
+          Support for the Qualcomm MSM8610 W5DS Global Common device.
+
+config MACH_MSM8X10_W3DS_GLOBAL_COM
+        depends on ARCH_MSM8610
+        select MACH_LGE
+        bool "MSM8610 W3DS Global Common"
+        help
+          Support for the Qualcomm MSM8610 W3DS Global Common device.
+
 endmenu
 
 menu "LGE Specific Patches"
