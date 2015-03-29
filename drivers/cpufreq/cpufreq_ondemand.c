@@ -159,6 +159,10 @@ static struct dbs_tuners {
 	.input_boost = 0,
 };
 
+#ifdef CONFIG_MACH_MSM8X10_L70P /* Boost Cpu when wake up */
+extern int boost_freq;
+#endif
+
 static inline u64 get_cpu_idle_time_jiffy(unsigned int cpu, u64 *wall)
 {
 	u64 idle_time;
@@ -179,6 +183,18 @@ static inline u64 get_cpu_idle_time_jiffy(unsigned int cpu, u64 *wall)
 		*wall = jiffies_to_usecs(cur_wall_time);
 
 	return jiffies_to_usecs(idle_time);
+}
+
+static inline cputime64_t get_cpu_idle_time(unsigned int cpu, cputime64_t *wall)
+{
+	u64 idle_time = get_cpu_idle_time_us(cpu, NULL);
+
+	if (idle_time == -1ULL)
+		return get_cpu_idle_time_jiffy(cpu, wall);
+	else
+		idle_time += get_cpu_iowait_time_us(cpu, wall);
+
+	return idle_time;
 }
 
 static inline cputime64_t get_cpu_iowait_time(unsigned int cpu, cputime64_t *wall)
@@ -560,7 +576,7 @@ static ssize_t store_ignore_nice_load(struct kobject *a, struct attribute *b,
 		struct cpu_dbs_info_s *dbs_info;
 		dbs_info = &per_cpu(od_cpu_dbs_info, j);
 		dbs_info->prev_cpu_idle = get_cpu_idle_time(j,
-						&dbs_info->prev_cpu_wall, dbs_tuners_ins.io_is_busy);
+						&dbs_info->prev_cpu_wall);
 		if (dbs_tuners_ins.ignore_nice)
 			dbs_info->prev_cpu_nice = kcpustat_cpu(j).cpustat[CPUTIME_NICE];
 
@@ -611,12 +627,19 @@ static ssize_t store_powersave_bias(struct kobject *a, struct attribute *b,
 		if (reenable_timer) {
 			/* reinstate dbs timer */
 			for_each_online_cpu(cpu) {
+				if (lock_policy_rwsem_write(cpu) < 0)
+					continue;
+
 				dbs_info = &per_cpu(od_cpu_dbs_info, cpu);
 
 				for_each_cpu(j, &cpus_timer_done) {
 					if (!dbs_info->cur_policy) {
 						pr_err("Dbs policy is NULL\n");
+						goto skip_this_cpu;
 					}
+					if (cpumask_test_cpu(j, dbs_info->
+							cur_policy->cpus))
+						goto skip_this_cpu;
 				}
 
 				cpumask_set_cpu(cpu, &cpus_timer_done);
@@ -630,6 +653,8 @@ static ssize_t store_powersave_bias(struct kobject *a, struct attribute *b,
 					mutex_unlock(&dbs_info->timer_mutex);
 					atomic_set(&dbs_info->sync_enabled, 1);
 				}
+skip_this_cpu:
+				unlock_policy_rwsem_write(cpu);
 			}
 		}
 		ondemand_powersave_bias_init();
@@ -637,6 +662,8 @@ static ssize_t store_powersave_bias(struct kobject *a, struct attribute *b,
 		/* running at maximum or minimum frequencies; cancel
 		   dbs timer as periodic load sampling is not necessary */
 		for_each_online_cpu(cpu) {
+			if (lock_policy_rwsem_write(cpu) < 0)
+				continue;
 
 			dbs_info = &per_cpu(od_cpu_dbs_info, cpu);
 
@@ -668,10 +695,11 @@ static ssize_t store_powersave_bias(struct kobject *a, struct attribute *b,
 				mutex_unlock(&dbs_info->timer_mutex);
 
 			}
+skip_this_cpu_bypass:
+			unlock_policy_rwsem_write(cpu);
 		}
 	}
 
-skip_this_cpu_bypass:
 	mutex_unlock(&dbs_mutex);
 	put_online_cpus();
 
@@ -766,7 +794,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 
 		j_dbs_info = &per_cpu(od_cpu_dbs_info, j);
 
-		cur_idle_time = get_cpu_idle_time(j, &cur_wall_time, dbs_tuners_ins.io_is_busy);
+		cur_idle_time = get_cpu_idle_time(j, &cur_wall_time);
 		cur_iowait_time = get_cpu_iowait_time(j, &cur_wall_time);
 
 		wall_time = (unsigned int)
@@ -853,6 +881,15 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 	load_at_max_freq = (cur_load * policy->cur)/policy->cpuinfo.max_freq;
 
 	cpufreq_notify_utilization(policy, load_at_max_freq);
+
+#ifdef CONFIG_MACH_MSM8X10_L70P /* Boost Cpu when wake up */
+	if (boost_freq == 2) {
+		if(policy->cur < policy->max){
+			dbs_freq_increase(policy, policy->max);
+		}
+		return;
+	}
+#endif
 	/* Check for frequency increase */
 	if (max_load_freq > dbs_tuners_ins.up_threshold * policy->cur) {
 		/* If switching to max speed, apply sampling_down_factor */
@@ -1020,11 +1057,14 @@ static void dbs_refresh_callback(struct work_struct *work)
 
 	get_online_cpus();
 
+	if (lock_policy_rwsem_write(cpu) < 0)
+		goto bail_acq_sema_failed;
+
 	this_dbs_info = &per_cpu(od_cpu_dbs_info, cpu);
 	policy = this_dbs_info->cur_policy;
 	if (!policy) {
 		/* CPU not using ondemand governor */
-		goto bail_acq_sema_failed;
+		goto bail_incorrect_governor;
 	}
 
 	if (dbs_tuners_ins.input_boost)
@@ -1042,8 +1082,11 @@ static void dbs_refresh_callback(struct work_struct *work)
 			policy->cur = target_freq;
 
 		this_dbs_info->prev_cpu_idle = get_cpu_idle_time(cpu,
-				&this_dbs_info->prev_cpu_wall, dbs_tuners_ins.io_is_busy);
+				&this_dbs_info->prev_cpu_wall);
 	}
+
+bail_incorrect_governor:
+	unlock_policy_rwsem_write(cpu);
 
 bail_acq_sema_failed:
 	put_online_cpus();
@@ -1102,16 +1145,20 @@ static int dbs_sync_thread(void *data)
 			src_max_load = 0;
 		}
 
+		if (lock_policy_rwsem_write(cpu) < 0)
+			goto bail_acq_sema_failed;
+
 		if (!atomic_read(&this_dbs_info->sync_enabled)) {
 			atomic_set(&this_dbs_info->src_sync_cpu, -1);
 			put_online_cpus();
+			unlock_policy_rwsem_write(cpu);
 			continue;
 		}
 
 		policy = this_dbs_info->cur_policy;
 		if (!policy) {
 			/* CPU not using ondemand governor */
-			goto bail_acq_sema_failed;
+			goto bail_incorrect_governor;
 		}
 		delay = usecs_to_jiffies(dbs_tuners_ins.sampling_rate);
 
@@ -1140,6 +1187,8 @@ static int dbs_sync_thread(void *data)
 			mutex_unlock(&this_dbs_info->timer_mutex);
 		}
 
+bail_incorrect_governor:
+		unlock_policy_rwsem_write(cpu);
 bail_acq_sema_failed:
 		put_online_cpus();
 		atomic_set(&this_dbs_info->src_sync_cpu, -1);
@@ -1159,6 +1208,15 @@ static void dbs_input_event(struct input_handle *handle, unsigned int type,
 		return;
 	}
 
+#ifdef CONFIG_MACH_MSM8X10_L70P /* Boost Cpu when wake up */
+	if (boost_freq == 1) {
+		if (!strcmp((char*)(handle->dev->name), "qpnp_pon")){
+			printk(KERN_ERR "ws->name=%s, boost_Freq=%d\n", handle->dev->name, boost_freq);
+			boost_freq++;
+			printk(KERN_ERR "ws->name=%s, boost_Freq=%d\n", handle->dev->name, boost_freq);
+		}
+	}
+#endif
 	for_each_online_cpu(i)
 		queue_work_on(i, dbs_wq, &per_cpu(dbs_refresh_work, i).work);
 }
@@ -1258,7 +1316,7 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 			j_dbs_info->cur_policy = policy;
 
 			j_dbs_info->prev_cpu_idle = get_cpu_idle_time(j,
-						&j_dbs_info->prev_cpu_wall, dbs_tuners_ins.io_is_busy);
+						&j_dbs_info->prev_cpu_wall);
 			if (dbs_tuners_ins.ignore_nice)
 				j_dbs_info->prev_cpu_nice =
 						kcpustat_cpu(j).cpustat[CPUTIME_NICE];
