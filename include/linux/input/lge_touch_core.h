@@ -26,6 +26,13 @@
 #define MAX_FINGER	5
 #define MAX_BUTTON	4
 #define FW_VER_INFO_NUM	4
+#define MAX_POINT_SIZE_FOR_LPWG 12
+
+struct point
+{
+    int x;
+    int y;
+};
 
 enum{
 	TIME_SINCE_BOOTING = 0,
@@ -59,6 +66,8 @@ struct touch_device_caps
 	u32		y_max;
 	u32		lcd_x;
 	u32		lcd_y;
+	u32		lcd_touch_ratio_x;
+	u32		lcd_touch_ratio_y;
 	u32		maker_id;
 	u32		maker_id_gpio;
 	u16		ghost_detection_value[GHOST_VALUE_MAX];
@@ -241,9 +250,22 @@ struct accuracy_filter_info {
 	struct accuracy_history_data	his_data;
 };
 
+struct state_info
+{
+    atomic_t power_state;
+    atomic_t interrupt_state;
+    atomic_t upgrade_state;
+    atomic_t ta_state;
+    atomic_t temperature_state;
+    atomic_t proximity_state;
+    atomic_t hallic_state;
+    atomic_t uevent_state;
+};
+
 struct lge_touch_data
 {
 	void*			h_touch;
+	struct state_info       state;
 	atomic_t		next_work;
 	atomic_t		device_init;
 	u8				work_sync_err_cnt;
@@ -276,6 +298,35 @@ struct lge_touch_data
 	bool sd_status;
 };
 
+
+enum{
+    TA_DISCONNECTED = 0,
+    TA_CONNECTED,
+};
+
+enum{
+    PROXIMITY_FAR = 0,
+    PROXIMITY_NEAR,
+};
+
+enum{
+    HALL_NONE = 0,
+    HALL_COVERED,
+};
+
+enum{
+    UEVENT_IDLE = 0,
+    UEVENT_BUSY,
+};
+
+
+typedef enum error_type {
+    NO_ERROR = 0,
+    ERROR,
+    IGNORE_EVENT,
+    IGNORE_EVENT_BUT_SAVE_IT,
+} err_t;
+
 struct touch_device_driver {
 	int		(*probe)			(struct lge_touch_data *lge_touch_ts);//(struct i2c_client *client);//us10_porting
 	void		(*remove)		(struct i2c_client *client);
@@ -285,6 +336,9 @@ struct touch_device_driver {
 	int		(*ic_ctrl)		(struct i2c_client *client, u8 code, u32 value);
 	int		(*fw_upgrade)		(struct i2c_client *client, struct touch_fw_info* info);
 	int		(*sysfs)			(struct i2c_client *client, char *buf, u8 code, struct touch_fw_info* fw_info);
+	err_t	 	(*suspend) (struct i2c_client *client);
+	err_t	 	(*resume) (struct i2c_client *client);
+	err_t	 	(*lpwg) (struct i2c_client *client, u32 code, u32 value, struct point *data);
 };
 
 enum{
@@ -387,6 +441,67 @@ enum{
 	IC_CTRL_RESET_CMD,
 	IC_CTRL_REPORT_MODE,
 	IC_CTRL_DOUBLE_TAP_WAKEUP_MODE,
+};
+
+/* For Error Handling
+  *
+  * DO_IF : execute 'do_work', and if the result is true, print 'error_log' and goto 'goto_error'.
+  * DO_SAFE : execute 'do_work', and if the result is '< 0', print 'error_log' and goto 'goto_error'
+  * ASSIGN : excute 'do_assign', and if the result is 'NULL', print 'error_log' and goto 'goto_error'
+  * ERROR_IF : if the condition is true(ERROR), print 'string' and goto 'goto_error'.
+  */
+#define DO_IF(do_work, goto_error)                              \
+do {                                                \
+    if(do_work){                                        \
+        printk(KERN_INFO "[Touch E] Action Failed [%s %d] \n", __FUNCTION__, __LINE__); \
+        goto goto_error;                                \
+    }                                           \
+} while(0)
+
+#define DO_SAFE(do_work, goto_error)                                \
+    DO_IF(unlikely((do_work) < 0), goto_error)
+
+#define ASSIGN(do_assign, goto_error)                               \
+do {                                                \
+    if((do_assign) == NULL){                                \
+        printk(KERN_INFO "[Touch E] Assign Failed [%s %d] \n", __FUNCTION__, __LINE__); \
+        goto goto_error;                                \
+    }                                           \
+} while(0)
+
+#define ERROR_IF(cond, string, goto_error)  \
+do {                        \
+    if(cond){               \
+        TOUCH_ERR_MSG(string);      \
+        goto goto_error;        \
+    }                   \
+} while(0)
+
+enum{
+    NOTIFY_TA_CONNECTION = 1,
+    NOTIFY_TEMPERATURE_CHANGE,
+    NOTIFY_PROXIMITY,
+    NOTIFY_HALL_IC,
+};
+
+enum{
+    LPWG_NONE = 0,
+    LPWG_DOUBLE_TAP,
+    LPWG_MULTI_TAP,
+    LPWG_PASSWORD,
+};
+
+enum{
+    LPWG_READ = 1,
+    LPWG_ENABLE,
+    LPWG_LCD_X,
+    LPWG_LCD_Y,
+    LPWG_ACTIVE_AREA_X1,
+    LPWG_ACTIVE_AREA_X2,
+    LPWG_ACTIVE_AREA_Y1,
+    LPWG_ACTIVE_AREA_Y2,
+    LPWG_TAP_COUNT,
+    LPWG_REPLY,
 };
 
 enum{
@@ -503,6 +618,9 @@ void* get_touch_handle(struct i2c_client *client);
 
 void power_lock_(int value);
 void power_unlock_(int value);
+
+void send_uevent(char* string[2]);
+void send_uevent_lpwg(struct i2c_client* client, int type);
 
 int touch_i2c_read(struct i2c_client *client, u8 reg, int len, u8 *buf);
 int touch_i2c_write(struct i2c_client *client, u8 reg, int len, u8 *buf);

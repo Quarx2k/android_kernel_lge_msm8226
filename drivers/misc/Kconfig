@@ -605,6 +605,14 @@ config TSPDRV
     bool "tspdrv"
         default n
         
+config TSPDRV_3_0V_VIBRATOR
+        bool "tspdrv use 3.0V Vibrator"
+        default n
+
+config TSPDRV_2_9V_VIBRATOR
+        bool "tspdrv use 2.9V Vibrator"
+        default n
+
 config ANDROID_SW_IRRC
 	bool "Android irrc support"
 	default n

@@ -456,8 +456,15 @@ IMMVIBESPIAPI VibeStatus ImmVibeSPI_ForceOut_SetSamples(VibeUInt8 nActuatorIndex
 		if(sm100_flag) {
 	        sm100_pwm_set(1, nForce); //MSM GP CLK update bit issue.
 		} else {
-			if(vib_dev != NULL)
+			if(vib_dev != NULL) {
+#if defined CONFIG_TSPDRV_3_0V_VIBRATOR
+				qpnp_vib_set_with_vtglevel(vib_dev, (nForce * 31) / 128 + 1, true);
+#elif defined CONFIG_TSPDRV_2_9V_VIBRATOR
+				qpnp_vib_set_with_vtglevel(vib_dev, (nForce * 31) / 128 + 0, true);
+#else
 				qpnp_vib_set_with_vtglevel(vib_dev, (nForce * 31) / 128 + 3, true);
+#endif
+			}
 		}
     }
     return VIBE_S_SUCCESS;

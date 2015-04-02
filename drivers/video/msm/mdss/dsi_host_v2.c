@@ -50,6 +50,10 @@ struct dsi_host_v2_private {
 static struct dsi_host_v2_private *dsi_host_private;
 static int msm_dsi_clk_ctrl(struct mdss_panel_data *pdata, int enable);
 
+#if defined(CONFIG_MACH_MSM8X10_W5) || defined(CONFIG_MACH_MSM8X10_W65)
+extern int lge_lcd_id;
+#endif
+
 int msm_dsi_init(void)
 {
 	if (!dsi_host_private) {
@@ -1220,6 +1224,15 @@ static int msm_dsi_cont_on(struct mdss_panel_data *pdata)
 	msm_dsi_set_irq(ctrl_pdata, DSI_INTR_ERROR_MASK);
 	dsi_host_private->clk_count = 1;
 	dsi_host_private->dsi_on = 1;
+#if defined(CONFIG_FB_MSM_MIPI_TIANMA_CMD_HVGA_PT_PANEL)
+     if (gpio_is_valid(ctrl_pdata->disp_te_gpio)) {
+         ret = gpio_request(ctrl_pdata->disp_te_gpio, "disp_te");
+         if (ret)
+             pr_err("gpio request failed %d\n", ret);
+ 
+         ctrl_pdata->disp_te_gpio_requested = 1;
+     }
+#endif
 	mutex_unlock(&ctrl_pdata->mutex);
 	return 0;
 }
@@ -1355,7 +1368,27 @@ static struct device_node *dsi_find_panel_of_node(
 		/* no panel cfg chg, parse dt */
 		pr_debug("%s:%d: no cmd line cfg present\n",
 			 __func__, __LINE__);
-		dsi_pan_node = dsi_pref_prim_panel(pdev);
+#if defined(CONFIG_MACH_MSM8X10_W5) || defined(CONFIG_MACH_MSM8X10_W65)
+                pr_debug("%s:%d: lcd id :lge_lcd_id : %d \n", __func__, __LINE__,lge_lcd_id);
+
+                if (lge_lcd_id == 0)//primary ID
+                {
+                        pr_debug("%s:%d: Primary panel \n", __func__, __LINE__);
+                        dsi_pan_node = of_parse_phandle(
+                                                                pdev->dev.of_node, "qcom,dsi-pref-prim-pan", 0);
+                }
+                else //for safe secondary
+                {
+                        pr_debug("%s:%d: Secondary panel \n", __func__, __LINE__);
+                        dsi_pan_node = of_parse_phandle(
+                                                                pdev->dev.of_node, "qcom,dsi-pref-secondary-pan", 0);
+                }
+#else   //qct original
+                dsi_pan_node = of_parse_phandle(
+                        pdev->dev.of_node,
+                        "qcom,dsi-pref-prim-pan", 0);
+#endif
+//		dsi_pan_node = dsi_pref_prim_panel(pdev);
 	} else {
 		if (panel_cfg[0] != '0') {
 			pr_err("%s:%d:ctrl id=[%d] not supported\n",
