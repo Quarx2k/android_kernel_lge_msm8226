@@ -41,9 +41,6 @@ struct kgsl_clk_stats {
 	unsigned int no_nap_cnt;
 	unsigned int elapsed;
 	unsigned int elapsed_old;
-#ifdef CONFIG_LGE_PM
-	unsigned int converted_on_time_old;
-#endif
 };
 
 struct kgsl_pwr_constraint {
@@ -54,7 +51,6 @@ struct kgsl_pwr_constraint {
 			unsigned int level;
 		} pwrlevel;
 	} hint;
-	unsigned long expires;
 };
 
 /**

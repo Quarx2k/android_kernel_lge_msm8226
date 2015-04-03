@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2014, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -37,7 +37,6 @@ static struct kgsl_snapshot_obj {
 	phys_addr_t ptbase;
 	void *ptr;
 	int dwords;
-	struct kgsl_mem_entry *entry;
 } objbuf[SNAPSHOT_OBJ_BUFSIZE];
 
 /* Pointer to the next open entry in the object list */
@@ -50,7 +49,6 @@ static void push_object(struct kgsl_device *device, int type,
 {
 	int index;
 	void *ptr;
-	struct kgsl_mem_entry *entry = NULL;
 
 	/*
 	 * Sometimes IBs can be reused in the same dump.  Because we parse from
@@ -76,7 +74,7 @@ static void push_object(struct kgsl_device *device, int type,
 	 * adreno_convertaddr verifies that the IB size is valid - at least in
 	 * the context of it being smaller then the allocated memory space
 	 */
-	ptr = adreno_convertaddr(device, ptbase, gpuaddr, dwords << 2, &entry);
+	ptr = adreno_convertaddr(device, ptbase, gpuaddr, dwords << 2);
 
 	if (ptr == NULL) {
 		KGSL_DRV_ERR(device,
@@ -89,7 +87,6 @@ static void push_object(struct kgsl_device *device, int type,
 	objbuf[objbufptr].gpuaddr = gpuaddr;
 	objbuf[objbufptr].ptbase = ptbase;
 	objbuf[objbufptr].dwords = dwords;
-	objbuf[objbufptr].entry = entry;
 	objbuf[objbufptr++].ptr = ptr;
 }
 
@@ -565,7 +562,6 @@ static int ib_add_gpu_object(struct kgsl_device *device, phys_addr_t ptbase,
 {
 	int i, ret, rem = dwords;
 	unsigned int *src;
-	struct kgsl_mem_entry *entry = NULL;
 
 	/*
 	 * If the object is already in the list, we don't need to parse it again
@@ -575,7 +571,7 @@ static int ib_add_gpu_object(struct kgsl_device *device, phys_addr_t ptbase,
 		return 0;
 
 	src = (unsigned int *) adreno_convertaddr(device, ptbase, gpuaddr,
-		dwords << 2, &entry);
+		dwords << 2);
 
 	if (src == NULL)
 		return -EINVAL;
@@ -599,8 +595,11 @@ static int ib_add_gpu_object(struct kgsl_device *device, phys_addr_t ptbase,
 				unsigned int gpuaddr = src[i + 1];
 				unsigned int size = src[i + 2];
 
-				parse_ib(device, ptbase, gpuaddr, size);
+				ret = parse_ib(device, ptbase, gpuaddr, size);
 
+				/* If adding the IB failed then stop parsing */
+				if (ret < 0)
+					goto done;
 			} else {
 				ret = ib_parse_type3(device, &src[i], ptbase);
 				/*
@@ -626,11 +625,6 @@ done:
 
 	if (ret >= 0)
 		snapshot_frozen_objsize += ret;
-
-	if (entry) {
-		kgsl_memdesc_unmap(&entry->memdesc);
-		kgsl_mem_entry_put(entry);
-	}
 
 	return ret;
 }
@@ -926,16 +920,15 @@ static int snapshot_ib(struct kgsl_device *device, void *snapshot,
 			if ((obj->dwords - i) < type3_pkt_size(*src) + 1)
 				continue;
 
-			if (adreno_cmd_is_ib(*src)) {
-				parse_ib(device, obj->ptbase, src[1],
+			if (adreno_cmd_is_ib(*src))
+				ret = parse_ib(device, obj->ptbase, src[1],
 					src[2]);
-			} else {
+			else
 				ret = ib_parse_type3(device, src, obj->ptbase);
 
-				/* Stop parsing if the type3 decode fails */
-				if (ret < 0)
-					break;
-			}
+			/* Stop parsing if the type3 decode fails */
+			if (ret < 0)
+				break;
 		}
 	}
 
@@ -951,10 +944,6 @@ static void *dump_object(struct kgsl_device *device, int obj, void *snapshot,
 		snapshot = kgsl_snapshot_add_section(device,
 			KGSL_SNAPSHOT_SECTION_IB, snapshot, remain,
 			snapshot_ib, &objbuf[obj]);
-		if (objbuf[obj].entry) {
-			kgsl_memdesc_unmap(&(objbuf[obj].entry->memdesc));
-			kgsl_mem_entry_put(objbuf[obj].entry);
-		}
 		break;
 	default:
 		KGSL_DRV_ERR(device,
