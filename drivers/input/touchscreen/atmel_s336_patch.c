@@ -426,7 +426,7 @@ static void mxt_patch_load_t71data(struct mxt_data *data)
 
 const char* mxt_patch_src_item_name(u8 src_id)
 {
-	const char* src_item_name[MXT_PATCH_MAX_TYPE] = {
+	const char* src_item_name[11] = {
 		MXT_XML_SRC_NONE,	//MXT_PATCH_ITEM_NONE		0
 		MXT_XML_SRC_CHRG,	//MXT_PATCH_ITEM_CHARGER	1
 		MXT_XML_SRC_FCNT,	//MXT_PATCH_ITEM_FINGER_CNT	2
@@ -438,11 +438,11 @@ const char* mxt_patch_src_item_name(u8 src_id)
 		MXT_XML_SRC_KCNT,	//MXT_PATCH_ITEM_KCNT		8
 		MXT_XML_SRC_KVAL,	//MXT_PATCH_ITEM_KVAL		9
 		MXT_XML_SRC_T9STATUS,	//MXT_PATCH_ITEM_T9STATUS	10
-		MXT_XML_SRC_USER1,
-		MXT_XML_SRC_USER2,
-		MXT_XML_SRC_USER3,
-		MXT_XML_SRC_USER4,
-		MXT_XML_SRC_USER5,
+	//	MXT_XML_SRC_USER1,
+	//	MXT_XML_SRC_USER2,
+	//	MXT_XML_SRC_USER3,
+	//	MXT_XML_SRC_USER4,
+	//	MXT_XML_SRC_USER5,
 	};
 
 	if (MXT_PATCH_ITEM_NONE <= src_id && src_id < MXT_PATCH_ITEM_END) {

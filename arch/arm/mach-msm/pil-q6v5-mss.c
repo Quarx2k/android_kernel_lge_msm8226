@@ -208,7 +208,7 @@ static void modem_crash_shutdown(const struct subsys_desc *subsys)
 {
 	struct modem_data *drv = subsys_to_drv(subsys);
 	drv->crash_shutdown = true;
-	if (!subsys_get_crash_status(drv->subsys) && (lge_get_modem_panic() != 3 )) {
+	if (!subsys_get_crash_status(drv->subsys) /*&& (lge_get_modem_panic() != 3 )*/) {
 		gpio_set_value(subsys->force_stop_gpio, 1);
 		mdelay(STOP_ACK_TIMEOUT_MS);
 	}
