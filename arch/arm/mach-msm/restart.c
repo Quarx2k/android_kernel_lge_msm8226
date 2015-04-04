@@ -303,7 +303,7 @@ static void msm_restart_prepare(const char *cmd)
 			__raw_writel(0x77665555, restart_reason);
 #endif
 		} else if (!strncmp(cmd, "laf", 14)) {
-			restart_mode = RESTART_DLOAD;
+			__raw_writel(0x6C616664, restart_reason);
 		} else if (!strncmp(cmd, "oem-", 4)) {
 			unsigned long code;
 			code = simple_strtoul(cmd + 4, NULL, 16) & 0xff;
